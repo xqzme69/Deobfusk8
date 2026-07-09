@@ -576,11 +576,11 @@ class FingerprintResult:
             f"{flag} {self.path}  confidence={self.confidence}%  verdict={self.verdict}"
         ]
         for f in self.findings:
-            mark = "✓" if f.present else "·"
+            mark = "+" if f.present else "-"
             pts = f"+{f.score}" if f.present else "   "
             lines.append(f"    {mark} {pts:>4}  {f.name}: {f.detail}")
         if self.decoy_sections:
-            lines.append(f"    ✓      decoy sections: {', '.join(self.decoy_sections)}")
+            lines.append(f"    +      decoy sections: {', '.join(self.decoy_sections)}")
         lines.append(
             f"         PE sections: {self.section_count} ({', '.join(self.section_names[:8])}"
             + (" ..." if len(self.section_names) > 8 else "")
@@ -655,7 +655,7 @@ def fingerprint(path: str) -> FingerprintResult:
         score += 12
     high_sec = result.section_count >= _MIN_OBFUSK8_SECTIONS
     f5 = _Finding(
-        name=f"High PE section count (≥{_MIN_OBFUSK8_SECTIONS})",
+        name=f"High PE section count (>={_MIN_OBFUSK8_SECTIONS})",
         present=high_sec,
         score=8,
         detail=f"{result.section_count} sections found",
@@ -696,7 +696,7 @@ def is_obfusk8(path: str, threshold: int = 55) -> bool:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Deobfusk8 fingerprinter — quickly detect Obfusk8-protected PE files"
+        description="Deobfusk8 fingerprinter: quickly detect Obfusk8-protected PE files"
     )
     ap.add_argument("binaries", nargs="+", help="One or more PE64 binaries to inspect")
     ap.add_argument(

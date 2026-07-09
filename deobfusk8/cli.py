@@ -1,141 +1,173 @@
 from __future__ import annotations
+
 import argparse
 import json
-import os
-from .strings import analyze_binary, write_json, write_txt
-from .exporters import write_comments, write_ida_script, write_ghidra_script
-from .key import MBASimplifier
+from pathlib import Path
+from typing import Any
+
 from .animator import print_scrambled
+from .exporters import write_comments, write_ghidra_script, write_ida_script
+from .key import MBASimplifier
+from .strings import analyze_binary, write_json, write_txt
+
 
 def _print_summary(
-    report: dict, *, include_runtime: bool = False, show_keys: bool = False
+    report: dict[str, Any], *, include_runtime: bool = False, show_keys: bool = False
 ) -> None:
-    strings = report.get("strings", {})
-    api = report.get("resolve8_api_hashes", {})
-    syscall = report.get("k8_syscalls", {})
-    inline = report.get("inline_decrypt_discovery", {})
-    slices = report.get("runtime_key_slices", {})
+    string_report = report.get("strings", {})
+    resolve8_report = report.get("resolve8_api_hashes", {})
+    syscall_report = report.get("k8_syscalls", {})
+    inline_report = report.get("inline_decrypt_discovery", {})
+    slice_report = report.get("runtime_key_slices", {})
+
     print(f"[+] ImageBase: {report.get('image_base')}")
     print(
         f"[+] Build hash: {report.get('build_hash')} from {report.get('build_hash_inputs')}"
     )
-    print(f"[+] Recovered user strings: {strings.get('recovered_user_strings', 0)}")
     print(
-        f"[+] Filtered runtime literals: {strings.get('filtered_runtime_literals', 0)}"
+        f"[+] Recovered user strings: {string_report.get('recovered_user_strings', 0)}"
     )
     print(
-        f"[+] Resolve8 HASH_IV: {api.get('hash_iv')} "
-        f"dword_hits={api.get('hit_count', 0)} "
-        f"name_hits={api.get('recovered_name_count', 0)}"
+        f"[+] Filtered runtime literals: {string_report.get('filtered_runtime_literals', 0)}"
     )
-    print(f"[+] K8 syscall intents: {len(syscall.get('syscall_intents', []))}")
-    print(f"[+] Inline decrypt candidates: {len(inline.get('candidates', []))}")
     print(
-        f"[+] Runtime-key slices complete: {slices.get('complete', 0)}/{slices.get('total', 0)}"
+        f"[+] Resolve8 HASH_IV: {resolve8_report.get('hash_iv')} "
+        f"dword_hits={resolve8_report.get('hit_count', 0)} "
+        f"name_hits={resolve8_report.get('recovered_name_count', 0)}"
+    )
+    print(f"[+] K8 syscall intents: {len(syscall_report.get('syscall_intents', []))}")
+    print(f"[+] Inline decrypt candidates: {len(inline_report.get('candidates', []))}")
+    print(
+        f"[+] Runtime-key slices complete: {slice_report.get('complete', 0)}/{slice_report.get('total', 0)}"
     )
     print(f"[+] Runtime: {report.get('elapsed_sec', 0):.2f}s")
     print("\n" + "=" * 104)
     print("RECOVERED STRINGS" + (" (including runtime)" if include_runtime else ""))
     print("=" * 104)
-    for d in strings.get("results", []):
-        if not d.get("text"):
+    for string_entry in string_report.get("results", []):
+        if not string_entry.get("text"):
             continue
-        if not include_runtime and d.get("filtered_by_default"):
+        if not include_runtime and string_entry.get("filtered_by_default"):
             continue
-        prefix = "L" if d.get("text_type") == "wchar" else ""
-        source_strategy = d.get("source_strategy") or d.get("source") or "unknown"
-        key_status = d.get("key_status") or (
-            "recovered" if d.get("runtime_key") else "missing"
+        wide_prefix = "L" if string_entry.get("text_type") == "wchar" else ""
+        source_strategy = (
+            string_entry.get("source_strategy")
+            or string_entry.get("source")
+            or "unknown"
         )
-        prefix_str = f'''{d.get("call_addr"):>12}  class={d.get("classification"):<26} conf={d.get("confidence"):<6} key={key_status:<27} src={source_strategy:<24} {prefix}"'''
-        secret_str = f'''{d.get("text")}"'''
-        print_scrambled(prefix_str, secret_str)
-        if show_keys and d.get("runtime_key"):
+        key_status = string_entry.get("key_status") or (
+            "recovered" if string_entry.get("runtime_key") else "missing"
+        )
+        line_prefix = (
+            f"{string_entry.get('call_addr'):>12}  "
+            f"class={string_entry.get('classification'):<26} "
+            f"conf={string_entry.get('confidence'):<6} "
+            f"key={key_status:<27} "
+            f'src={source_strategy:<24} {wide_prefix}"'
+        )
+        plaintext_tail = f'{string_entry.get("text")}"'
+        print_scrambled(line_prefix, plaintext_tail)
+        if show_keys and string_entry.get("runtime_key"):
             print(
-                f"              key={d.get('runtime_key')} key_source={d.get('key_source')}"
+                f"              key={string_entry.get('runtime_key')} "
+                f"key_source={string_entry.get('key_source')}"
             )
-        if show_keys and d.get("warnings"):
-            print(f"              warnings={'; '.join(d.get('warnings') or [])}")
-    name_hits = api.get("recovered_name_hits") or []
+        if show_keys and string_entry.get("warnings"):
+            print(
+                f"              warnings={'; '.join(string_entry.get('warnings') or [])}"
+            )
+
+    name_hits = resolve8_report.get("recovered_name_hits") or []
     if name_hits:
         print("\n" + "=" * 104)
         print("RESOLVE8 / STEALTH NAME HITS")
         print("=" * 104)
-        for item in name_hits:
-            line = f"{item.get('name', ''):<34} kind={item.get('kind', ''):<14} hash={item.get('hash_hex', '-')} source={item.get('source', '-')}"
+        for api_hit in name_hits:
+            line = (
+                f"{api_hit.get('name', ''):<34} "
+                f"kind={api_hit.get('kind', ''):<14} "
+                f"hash={api_hit.get('hash_hex', '-')} "
+                f"source={api_hit.get('source', '-')}"
+            )
             print_scrambled("", line, steps=10)
-    if syscall.get("syscall_intents"):
+    if syscall_report.get("syscall_intents"):
         print("\n" + "=" * 104)
         print("K8 SYSCALL INTENTS")
         print("=" * 104)
-        for s in syscall.get("syscall_intents", []):
+        for syscall_intent in syscall_report.get("syscall_intents", []):
             print(
-                f"{s['name']:<34} source={s['source']:<22} hash={s.get('hash_hex') or '-'}"
+                f"{syscall_intent['name']:<34} "
+                f"source={syscall_intent['source']:<22} "
+                f"hash={syscall_intent.get('hash_hex') or '-'}"
             )
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Deobfusk8: static Obfusk8 extractor with strings, Resolve8, K8 and IDA/Ghidra output",
-        formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=52, width=120)
+        formatter_class=lambda prog: argparse.HelpFormatter(
+            prog, max_help_position=52, width=120
+        ),
     )
-    ap.add_argument("binary", nargs="?", help="Path to PE64 binary")
-    ap.add_argument("--json", dest="json_path", help="Write full report JSON")
-    ap.add_argument("--txt", dest="txt_path", help="Write recovered strings only")
-    ap.add_argument(
+    parser.add_argument("binary", nargs="?", help="Path to PE64 binary")
+    parser.add_argument("--json", dest="json_path", help="Write full report JSON")
+    parser.add_argument("--txt", dest="txt_path", help="Write recovered strings only")
+    parser.add_argument(
         "--comments",
         dest="comments_path",
         help="Write plain comment map: 0xADDR ; OBFUSCATE_STRING -> ...",
     )
-    ap.add_argument("--ida", dest="ida_path", help="Write IDAPython annotation script")
-    ap.add_argument(
+    parser.add_argument(
+        "--ida", dest="ida_path", help="Write IDAPython annotation script"
+    )
+    parser.add_argument(
         "--ghidra", dest="ghidra_path", help="Write Ghidra/Jython annotation script"
     )
-    ap.add_argument(
+    parser.add_argument(
         "--show-keys", action="store_true", help="Print recovered runtime AES keys"
     )
-    ap.add_argument(
+    parser.add_argument(
         "--include-runtime",
         action="store_true",
         help="Include Obfusk8 runtime literals in console/TXT/export output",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--include-unreferenced-hashes",
         action="store_true",
         help="Include API hashes not found as DWORD constants",
     )
-    ap.add_argument("--verbose", "-v", action="store_true")
-    ap.add_argument("--no-pro-fallback", action="store_true")
-    ap.add_argument("--no-symbolic", action="store_true")
-    ap.add_argument("--full-local-threshold", type=int, default=8)
-    ap.add_argument(
+    parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--no-pro-fallback", action="store_true")
+    parser.add_argument("--no-symbolic", action="store_true")
+    parser.add_argument("--full-local-threshold", type=int, default=8)
+    parser.add_argument(
         "--local-max-steps",
         type=int,
         default=80000,
         help="Max local-interpreter steps per call-site; default favors quality over speed",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--fast",
         action="store_true",
         help="Use a conservative fast preset: fewer local steps and lower full-local threshold",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--deep",
         action="store_true",
         help="Use a deeper preset for harder wrappers: more local steps",
     )
-    ap.add_argument("--slice-limit", type=int, default=0)
-    ap.add_argument("--z3-self-test", action="store_true")
-    ap.add_argument(
+    parser.add_argument("--slice-limit", type=int, default=0)
+    parser.add_argument("--z3-self-test", action="store_true")
+    parser.add_argument(
         "--compare-expected",
         help="Compare recovered strings against expected corpus JSON",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--write-expected",
         help="Write expected corpus JSON from current recovered strings",
     )
-    ap.add_argument("--fail-on-mismatch", action="store_true")
-    args = ap.parse_args(argv)
+    parser.add_argument("--fail-on-mismatch", action="store_true")
+    args = parser.parse_args(argv)
     if args.z3_self_test:
         proof = MBASimplifier.prove_with_z3()
         print(json.dumps(proof, indent=2, ensure_ascii=False))
@@ -144,8 +176,8 @@ def main(argv: list[str] | None = None) -> int:
         ):
             return 2
         return 0
-    if not args.binary or not os.path.isfile(args.binary):
-        ap.print_help()
+    if not args.binary or not Path(args.binary).is_file():
+        parser.print_help()
         return 1
     if args.fast and args.deep:
         print("[-] --fast and --deep are mutually exclusive")
@@ -198,39 +230,42 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"[+] Ghidra script written: {args.ghidra_path}")
     recovered = [
-        d.get("text")
-        for d in report.get("strings", {}).get("results", [])
-        if d.get("text") and (args.include_runtime or not d.get("filtered_by_default"))
+        string_entry.get("text")
+        for string_entry in report.get("strings", {}).get("results", [])
+        if string_entry.get("text")
+        and (args.include_runtime or not string_entry.get("filtered_by_default"))
     ]
     if args.write_expected:
-        with open(args.write_expected, "w", encoding="utf-8") as f:
-            json.dump({"expected_strings": recovered}, f, indent=2, ensure_ascii=False)
+        with open(args.write_expected, "w", encoding="utf-8") as expected_file:
+            json.dump(
+                {"expected_strings": recovered},
+                expected_file,
+                indent=2,
+                ensure_ascii=False,
+            )
         print(f"[+] Expected corpus written: {args.write_expected}")
     if args.compare_expected:
-        with open(args.compare_expected, "r", encoding="utf-8") as f:
-            exp = json.load(f)
-        expected = exp.get("expected_strings", exp if isinstance(exp, list) else [])
-        missing = [x for x in expected if x not in recovered]
-        extra = [x for x in recovered if x not in expected]
+        with open(args.compare_expected, "r", encoding="utf-8") as expected_file:
+            expected_payload = json.load(expected_file)
+        expected = expected_payload.get(
+            "expected_strings",
+            expected_payload if isinstance(expected_payload, list) else [],
+        )
+        missing = [text for text in expected if text not in recovered]
+        extra = [text for text in recovered if text not in expected]
         ok = not missing and (not extra)
         print("\n" + "=" * 104)
         print("EXPECTED COMPARISON")
         print("=" * 104)
         print(f"ok={ok}")
-        for x in missing:
-            print(f"  missing: {x}")
-        for x in extra:
-            print(f"  extra: {x}")
+        for text in missing:
+            print(f"  missing: {text}")
+        for text in extra:
+            print(f"  extra: {text}")
         if not ok and args.fail_on_mismatch:
             return 2
     return 0
 
 
 if __name__ == "__main__":
-    import os
-    import sys
-
-    code = int(main() or 0)
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
+    raise SystemExit(main())

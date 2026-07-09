@@ -20,7 +20,9 @@ def _iter_binaries(path: Path) -> Iterable[Path]:
             yield p
 
 
-def _recovered_strings(report: Dict[str, Any], *, include_runtime: bool = False) -> List[str]:
+def _recovered_strings(
+    report: Dict[str, Any], *, include_runtime: bool = False
+) -> List[str]:
     out: List[str] = []
     for r in report.get("strings", {}).get("results", []):
         if not r.get("text"):
@@ -49,18 +51,27 @@ def _count_field(report: Dict[str, Any], field: str) -> Dict[str, int]:
     return counts
 
 
-def compare_one(name: str, report: Dict[str, Any], expected: Dict[str, Any]) -> Dict[str, Any]:
+def compare_one(
+    name: str, report: Dict[str, Any], expected: Dict[str, Any]
+) -> Dict[str, Any]:
     exp = expected.get(name, {})
     exp_strings = exp.get("strings", [])
     exp_syscalls = exp.get("syscalls", [])
     got_strings = _recovered_strings(report)
     got_syscalls = _syscall_intents(report)
     missing_strings = [x for x in exp_strings if x not in got_strings]
-    extra_strings = [x for x in got_strings if x not in exp_strings] if exp_strings else []
+    extra_strings = (
+        [x for x in got_strings if x not in exp_strings] if exp_strings else []
+    )
     missing_syscalls = [x for x in exp_syscalls if x not in got_syscalls]
-    extra_syscalls = [x for x in got_syscalls if x not in exp_syscalls] if exp_syscalls else []
+    extra_syscalls = (
+        [x for x in got_syscalls if x not in exp_syscalls] if exp_syscalls else []
+    )
     return {
-        "ok": not missing_strings and not extra_strings and not missing_syscalls and not extra_syscalls,
+        "ok": not missing_strings
+        and not extra_strings
+        and not missing_syscalls
+        and not extra_syscalls,
         "missing_strings": missing_strings,
         "extra_strings": extra_strings,
         "missing_syscalls": missing_syscalls,
@@ -81,7 +92,9 @@ def _terminate_process_tree(proc: subprocess.Popen[Any]) -> None:
             pass
 
 
-def _run_cli(cmd: List[str], *, cwd: str, env: Dict[str, str], log_path: Path, timeout: int) -> int:
+def _run_cli(
+    cmd: List[str], *, cwd: str, env: Dict[str, str], log_path: Path, timeout: int
+) -> int:
     with log_path.open("w", encoding="utf-8") as log_file:
         proc = subprocess.Popen(
             cmd,
@@ -187,18 +200,32 @@ def run_corpus(
         print(f"[*] Corpus sample: {name}", flush=True)
         t0 = time.time()
         try:
-            code = _run_cli(cmd, cwd=package_root, env=env, log_path=log_path, timeout=sample_timeout)
+            code = _run_cli(
+                cmd,
+                cwd=package_root,
+                env=env,
+                log_path=log_path,
+                timeout=sample_timeout,
+            )
             if code != 0:
                 raise RuntimeError(f"sample exited with code {code}; see {log_path}")
             report = json.loads(json_path.read_text(encoding="utf-8"))
             item: Dict[str, Any] = {
                 "ok": True,
                 "elapsed_sec": round(time.time() - t0, 3),
-                "user_strings": _recovered_strings(report, include_runtime=include_runtime),
-                "user_string_count": report.get("strings", {}).get("recovered_user_strings", 0),
-                "filtered_runtime_literals": report.get("strings", {}).get("filtered_runtime_literals", 0),
+                "user_strings": _recovered_strings(
+                    report, include_runtime=include_runtime
+                ),
+                "user_string_count": report.get("strings", {}).get(
+                    "recovered_user_strings", 0
+                ),
+                "filtered_runtime_literals": report.get("strings", {}).get(
+                    "filtered_runtime_literals", 0
+                ),
                 "syscalls": _syscall_intents(report),
-                "resolve8_hit_count": report.get("resolve8_api_hashes", {}).get("hit_count", 0),
+                "resolve8_hit_count": report.get("resolve8_api_hashes", {}).get(
+                    "hit_count", 0
+                ),
                 "build_hash": report.get("build_hash"),
                 "key_status_counts": _count_field(report, "key_status"),
                 "source_strategy_counts": _count_field(report, "source_strategy"),
@@ -212,22 +239,38 @@ def run_corpus(
             if expected:
                 item["compare"] = compare_one(name, report, expected)
             summary["samples"][name] = item
-            print(f"    strings={item['user_string_count']} syscalls={len(item['syscalls'])} runtime={item['filtered_runtime_literals']} elapsed={item['elapsed_sec']}s", flush=True)
+            print(
+                f"    strings={item['user_string_count']} syscalls={len(item['syscalls'])} runtime={item['filtered_runtime_literals']} elapsed={item['elapsed_sec']}s",
+                flush=True,
+            )
         except Exception as e:
-            summary["samples"][name] = {"ok": False, "elapsed_sec": round(time.time() - t0, 3), "error": repr(e), "log": log_path.name}
+            summary["samples"][name] = {
+                "ok": False,
+                "elapsed_sec": round(time.time() - t0, 3),
+                "error": repr(e),
+                "log": log_path.name,
+            }
             print(f"    ERROR: {e!r}", flush=True)
 
     failed = [name for name, item in summary["samples"].items() if not item.get("ok")]
-    mismatched = [name for name, item in summary["samples"].items() if item.get("compare") and not item["compare"].get("ok")]
+    mismatched = [
+        name
+        for name, item in summary["samples"].items()
+        if item.get("compare") and not item["compare"].get("ok")
+    ]
     summary["failed"] = failed
     summary["mismatched"] = mismatched
     summary["ok"] = not failed and not mismatched
-    (out / "corpus_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    (out / "corpus_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     return summary
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="Run Deobfusk8 against a directory of PE samples")
+    ap = argparse.ArgumentParser(
+        description="Run Deobfusk8 against a directory of PE samples"
+    )
     ap.add_argument("input", help="Sample EXE or directory containing *.exe")
     ap.add_argument("--out", required=True, help="Output directory")
     ap.add_argument("--expected", help="Optional expected corpus JSON")
@@ -256,7 +299,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         deep=args.deep,
         sample_timeout=args.sample_timeout,
     )
-    print(json.dumps({"ok": summary["ok"], "failed": summary["failed"], "mismatched": summary["mismatched"]}, indent=2), flush=True)
+    print(
+        json.dumps(
+            {
+                "ok": summary["ok"],
+                "failed": summary["failed"],
+                "mismatched": summary["mismatched"],
+            },
+            indent=2,
+        ),
+        flush=True,
+    )
     return 2 if args.fail_on_mismatch and not summary["ok"] else 0
 
 

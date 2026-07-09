@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import time
 import json
 import re
@@ -9,7 +9,7 @@ from .aes import INV_SBOX, decrypt_aes_ecb
 from capstone.x86 import X86_REG_RIP
 from capstone import CS_OP_IMM, CS_OP_MEM, CS_OP_REG
 from .pe import PEImage, Addr
-from .disasm import make_cs, find_function_boundaries
+from .disasm import make_cs
 from .hash import fnv1a_32, u32
 from .result import (
     CallSiteResult,
@@ -37,6 +37,8 @@ from .k8_syscall import (
     InlineDecryptDiscovery,
     RuntimeKeyBackwardSlicer,
 )
+
+ResolvedValue = int | Tuple[str, int]
 
 
 class Analyzer:
@@ -297,7 +299,7 @@ class Analyzer:
 
     def resolve_reg_backwards(
         self, insns: List[Any], idx: int, reg: int, depth: int = 0
-    ) -> Optional[Value]:
+    ) -> Optional[ResolvedValue]:
         if depth > 8:
             return None
         want = self.canon_reg(reg)
@@ -600,7 +602,7 @@ class Analyzer:
             chunks = (raw_size + 15) // 16
         return (chunks, raw_size)
 
-    def _value_from_writer(self, insns: List[Any], idx: int) -> Optional[Value]:
+    def _value_from_writer(self, insns: List[Any], idx: int) -> Optional[ResolvedValue]:
         insn = insns[idx]
         if len(insn.operands) < 2:
             if (
@@ -822,7 +824,6 @@ class Analyzer:
         out: List[CallSiteResult] = []
         if not calls:
             return out
-        text_base = self.pe.text["va"] if self.pe.text else self.pe.base
         for call_addr, decrypt_func in calls:
             insns = self.context_insns(call_addr, before=6144, after=64)
             call_idx = self.find_insn_index(insns, call_addr)
@@ -946,7 +947,6 @@ class UniversalAnalyzer(Analyzer):
             saw_r8_small = False
             saw_r9_small = False
             saw_stack_key = False
-            saw_stack_ks = False
             for x in ctx[max(0, idx - 30) : idx]:
                 if not x.operands:
                     continue
@@ -972,12 +972,6 @@ class UniversalAnalyzer(Analyzer):
                         and (d.mem.disp == 32)
                     ):
                         saw_stack_key = True
-                    if (
-                        d.type == CS_OP_MEM
-                        and self.reg_name(d.mem.base) == "rsp"
-                        and (d.mem.disp == 40)
-                    ):
-                        saw_stack_ks = True
             if saw_r8_small and saw_r9_small and saw_stack_key:
                 callsites.append((call_addr, target))
                 target_counts[target] = target_counts.get(target, 0) + 1
@@ -1351,7 +1345,9 @@ class FastUniversalAnalyzer(UniversalAnalyzer):
         super().__init__(path, verbose=verbose, use_pro_fallback=use_pro_fallback)
         self._fast_xrefs_cache: Optional[Dict[int, List[int]]] = None
         self._pdata_funcs: Optional[List[Tuple[int, int]]] = None
-        self._decrypt_calls_cache: Optional[Tuple[List[int], List[Tuple[int, int]]]] = None
+        self._decrypt_calls_cache: Optional[Tuple[List[int], List[Tuple[int, int]]]] = (
+            None
+        )
 
     def find_decrypt_calls(self) -> Tuple[List[int], List[Tuple[int, int]]]:
         if self._decrypt_calls_cache is not None:
@@ -2301,9 +2297,19 @@ class Obfusk8Analyzer(SymbolicAnalyzer):
             return True
         if "\\" in text or "/" in text or "." in text:
             return False
-        api_like = re.match(r"^(Nt|Zw|Rtl|Ldr|Get|Set|Create|Open|Close|Read|Write|Virtual|Internet|Crypt|Find)[A-Za-z0-9_]+$", text)
+        api_like = re.match(
+            r"^(Nt|Zw|Rtl|Ldr|Get|Set|Create|Open|Close|Read|Write|Virtual|Internet|Crypt|Find)[A-Za-z0-9_]+$",
+            text,
+        )
         if api_like:
-            known = {api for api in COMMON_APIS if re.match(r"^(Nt|Zw|Rtl|Ldr|Get|Set|Create|Open|Close|Read|Write|Virtual|Internet|Crypt|Find)[A-Za-z0-9_]+$", api)}
+            known = {
+                api
+                for api in COMMON_APIS
+                if re.match(
+                    r"^(Nt|Zw|Rtl|Ldr|Get|Set|Create|Open|Close|Read|Write|Virtual|Internet|Crypt|Find)[A-Za-z0-9_]+$",
+                    api,
+                )
+            }
             if any(api.startswith(text) and api != text for api in known):
                 return True
             return False
@@ -2313,7 +2319,11 @@ class Obfusk8Analyzer(SymbolicAnalyzer):
             return True
         if len(text) >= 6 and unique <= 3:
             return True
-        if len(text) >= 6 and unique <= 4 and not re.search(r"[a-z]{2,}|[A-Z][a-z]", text):
+        if (
+            len(text) >= 6
+            and unique <= 4
+            and not re.search(r"[a-z]{2,}|[A-Z][a-z]", text)
+        ):
             return True
         return False
 
@@ -2340,10 +2350,12 @@ class Obfusk8Analyzer(SymbolicAnalyzer):
             "obfusk8_decode_artifact",
         )
 
-    def _decode_local_source(self, call_addr: int) -> Optional[Tuple[str, str, Dict[str, Any]]]:
+    def _decode_local_source(
+        self, call_addr: int
+    ) -> Optional[Tuple[str, str, Dict[str, Any]]]:
         try:
             local = self.recover_from_local_state(call_addr)
-        except Exception as exc:
+        except Exception:
             return None
         if not local.get("ok"):
             return None
@@ -2385,7 +2397,11 @@ class Obfusk8Analyzer(SymbolicAnalyzer):
         if result.chunks is None and local.get("chunks") is not None:
             result.chunks = int(local["chunks"])
         key = local.get("runtime_key")
-        if isinstance(key, (bytes, bytearray)) and len(key) == 16 and key != b"\x00" * 16:
+        if (
+            isinstance(key, (bytes, bytearray))
+            and len(key) == 16
+            and key != b"\x00" * 16
+        ):
             result.runtime_key = bytes(key).hex()
             result.key_source = "function_entry_local_concrete"
         result.traces.append(

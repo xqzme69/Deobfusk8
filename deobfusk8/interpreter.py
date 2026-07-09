@@ -1,10 +1,11 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Tuple, Callable
+
+from typing import Any, Dict, List, Optional
+
 from capstone import CS_OP_IMM, CS_OP_MEM, CS_OP_REG
 from capstone.x86 import X86_REG_RIP
-import struct
-from .pe import Addr
-from .result import UNKNOWN, sval
+
+from .result import UNKNOWN
 
 
 class Analyzer:
@@ -318,12 +319,12 @@ class LocalConcreteInterpreter:
                 if ops[0].type == CS_OP_IMM:
                     target = int(ops[0].imm)
                 if target in self.summaries:
-                    self.set_reg(st, _REG_ID_RAX, self.summaries[target])
+                    st.regs["rax"] = self.summaries[target] & 18446744073709551615
                     st.log(
                         f"summary call {hex(target)} -> rax={hex(self.summaries[target])}"
                     )
                 else:
-                    self.set_reg(st, _REG_ID_RAX, 0)
+                    st.regs["rax"] = 0
                     st.log(f"unknown call {(hex(target) if target else '?')} -> rax=0")
                 st.pc = next_pc
                 return

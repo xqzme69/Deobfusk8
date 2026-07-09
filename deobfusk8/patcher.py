@@ -2,7 +2,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import struct
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,7 +82,7 @@ class PatchResult:
 
     def __str__(self) -> str:
         lines = [
-            f"[deobfusk8 patcher] {('DRY RUN — ' if self.dry_run else '')}output: {self.output}",
+            f"[deobfusk8 patcher] {('DRY RUN - ' if self.dry_run else '')}output: {self.output}",
             f"  source patches : {self.source_patches_ok} ok / {self.source_patches_skipped} skipped / {self.source_patches_failed} failed",
             f"  call NOPs      : {self.nop_patches_ok} ok / {self.nop_patches_skipped} skipped / {self.nop_patches_failed} failed",
         ]
@@ -163,7 +162,7 @@ def patch_binary(
                         result.source_patches_ok += 1
                         if verbose:
                             print(
-                                f"  [+] source {source_va_s} → file+0x{file_off:X}: {repr(text)[:72]}"
+                                f"  [+] source {source_va_s} -> file+0x{file_off:X}: {repr(text)[:72]}"
                             )
                     except Exception as exc:
                         detail.source_patch = f"failed: {exc}"
@@ -193,10 +192,10 @@ def patch_binary(
                     if opcode == 232:
                         if not dry_run:
                             raw[call_off : call_off + 5] = b"\x90" * 5
-                        detail.nop_patch = f"ok @ file+0x{call_off:X} (E8→NOP×5)"
+                        detail.nop_patch = f"ok @ file+0x{call_off:X} (E8 -> NOP x5)"
                         result.nop_patches_ok += 1
                         if verbose:
-                            print(f"  [+] NOP  {call_addr_s} → file+0x{call_off:X}")
+                            print(f"  [+] NOP  {call_addr_s} -> file+0x{call_off:X}")
                     elif opcode == 255 and raw[call_off + 1] & 56 == 16:
                         detail.nop_patch = f"skipped: indirect CALL at file+0x{call_off:X} (not safe to blindly NOP)"
                         result.nop_patches_skipped += 1
@@ -225,7 +224,7 @@ def write_patch_report(result: PatchResult, path: str) -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Deobfusk8 binary patcher — write a static-analysis-friendly copy of an Obfusk8-protected PE with plaintext strings at source blobs."
+        description="Deobfusk8 binary patcher: write a static-analysis-friendly copy of an Obfusk8-protected PE with plaintext strings at source blobs."
     )
     ap.add_argument("binary", help="Original protected PE64 binary")
     ap.add_argument("report", help="Deobfusk8 JSON report (--json output)")
@@ -233,7 +232,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument(
         "--nop-calls",
         action="store_true",
-        help="NOP-out decrypt call-site instructions (5-byte CALL rel32 → 5×NOP)",
+        help="NOP-out decrypt call-site instructions (5-byte CALL rel32 -> 5xNOP)",
     )
     ap.add_argument(
         "--no-patch-sources",
@@ -267,7 +266,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"[*] Report : {args.report}")
     print(f"[*] Output : {args.output}")
     if args.dry_run:
-        print("[*] DRY RUN — no files will be written")
+        print("[*] DRY RUN - no files will be written")
     result = patch_binary(
         args.binary,
         args.report,

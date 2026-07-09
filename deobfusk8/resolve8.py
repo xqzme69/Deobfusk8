@@ -211,7 +211,7 @@ class APIHashHit:
 class Resolve8HashResolver:
     def __init__(
         self,
-        analyzer: SymbolicAnalyzer,
+        analyzer: Any,
         recovered_strings: Optional[Iterable[str]] = None,
     ):
         self.an = analyzer

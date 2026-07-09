@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 import json
 from pathlib import Path
 from typing import Any, Dict, List
+
 from .analyzer import Obfusk8Analyzer
 from .result import UniversalResult
 
@@ -40,20 +42,20 @@ def user_string_results(
     report: Dict[str, Any], *, include_runtime: bool = False
 ) -> List[Dict[str, Any]]:
     results = report.get("strings", {}).get("results", [])
-    out: List[Dict[str, Any]] = []
-    for item in results:
-        if not item.get("text"):
+    visible_strings: List[Dict[str, Any]] = []
+    for string_entry in results:
+        if not string_entry.get("text"):
             continue
-        if not include_runtime and item.get("filtered_by_default"):
+        if not include_runtime and string_entry.get("filtered_by_default"):
             continue
-        out.append(item)
-    return out
+        visible_strings.append(string_entry)
+    return visible_strings
 
 
 def write_json(report: Dict[str, Any], path: str) -> None:
-    clean = {k: v for k, v in report.items() if k != "_analyzer"}
+    public_report = {key: value for key, value in report.items() if key != "_analyzer"}
     Path(path).write_text(
-        json.dumps(clean, indent=2, ensure_ascii=False), encoding="utf-8"
+        json.dumps(public_report, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
 
@@ -61,9 +63,11 @@ def write_txt(
     report: Dict[str, Any], path: str, *, include_runtime: bool = False
 ) -> None:
     lines = []
-    for r in user_string_results(report, include_runtime=include_runtime):
-        prefix = "L" if r.get("text_type") == "wchar" else ""
-        lines.append(f'''{r.get("call_addr")}\t{prefix}"{r.get("text")}"''')
+    for string_entry in user_string_results(report, include_runtime=include_runtime):
+        wide_prefix = "L" if string_entry.get("text_type") == "wchar" else ""
+        lines.append(
+            f'{string_entry.get("call_addr")}\t{wide_prefix}"{string_entry.get("text")}"'
+        )
     Path(path).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 

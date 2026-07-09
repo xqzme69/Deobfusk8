@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Any, Sequence, Optional, List
+
+from typing import Any, Dict, Sequence
+
 from .hash import u32
 
 

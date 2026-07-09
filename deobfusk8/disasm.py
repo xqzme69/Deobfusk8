@@ -1,7 +1,10 @@
 from __future__ import annotations
-from typing import Any, Iterable, List, Optional, Tuple
-from capstone import Cs, CS_ARCH_X86, CS_MODE_64
+
+from typing import List, Optional, Tuple
+
+from capstone import CS_ARCH_X86, CS_MODE_64, CS_OP_MEM, Cs
 from capstone.x86 import X86_REG_RIP
+
 from .pe import PEImage, Addr
 
 
@@ -21,7 +24,7 @@ def find_functions_referencing(pe: PEImage, cs: Cs, target_va: Addr) -> List[Add
     for insn in cs.disasm(data, base):
         if insn.mnemonic == "lea" and len(insn.operands) == 2:
             op = insn.operands[1]
-            if op.type == 3:
+            if op.type == CS_OP_MEM:
                 if op.mem.base == X86_REG_RIP:
                     addr = insn.address + insn.size + op.mem.disp
                     if addr == target_va:

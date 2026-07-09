@@ -31,7 +31,7 @@ class SyscallIntent:
 class K8SyscallAnalyzer:
     def __init__(
         self,
-        analyzer: SymbolicAnalyzer,
+        analyzer: Any,
         strings: Iterable[str],
         api_report: Optional[Dict[str, Any]] = None,
     ):
@@ -110,7 +110,7 @@ class KeySliceReport:
 
 
 class InlineDecryptDiscovery:
-    def __init__(self, analyzer: SymbolicAnalyzer):
+    def __init__(self, analyzer: Any):
         self.an = analyzer
 
     def run(self) -> Dict[str, Any]:
@@ -156,7 +156,7 @@ class InlineDecryptDiscovery:
 
 
 class RuntimeKeyBackwardSlicer:
-    def __init__(self, analyzer: SymbolicAnalyzer):
+    def __init__(self, analyzer: Any):
         self.an = analyzer
 
     def _mem_addr_from_local_base(self, st: Any, mem: Any) -> Optional[int]:
